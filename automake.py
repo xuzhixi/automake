@@ -19,7 +19,8 @@ g_libs_opt = "-L/root/ACE_wrappers/ace -L/root/lib -lACE -lmysqlclient -lz -ldl 
 
 g_ar_opt = "" # 编译静态库时, ar命令的选项
 
-g_program_type = 1	# 1 表示一般程序, 2 表示动态库, 3 表示静态库
+g_program_type = 1		# 1 表示一般程序, 2 表示动态库, 3 表示静态库
+g_except_file_list = [] # 不进行编译链接处理的文件
 g_handle_subdir = True	# 是否递归对子目录进行编译链接
 g_except_dir_list = [ ]	# 不进行编译链接处理的目录, 仅当g_handle_subdir设置为True时才有效
 
@@ -31,6 +32,9 @@ DYNAMIC_TYPE = 2	# dynamic library
 STATIC_TYPE = 3		# static library
 g_tabKey = "\t"
 g_newLine = g_tabKey
+sourceItemList = None
+headerItemList = None
+
 
 def get_depandent_str(fileList, suffix) :
 	resultList = []
@@ -44,7 +48,11 @@ def get_depandent_str(fileList, suffix) :
 def get_str_by_filelist(fileNameList, suffix = ".o") :
 	depandentStr = ""
 	for fileName in fileNameList :
-		depandentStr += ("\\\n" + g_tabKey + os.path.basename(fileName) + suffix)
+		basename = os.path.basename( fileName )
+		if basename in sourceItemList :
+			depandentStr += ("\\\n" + g_tabKey + basename + suffix)
+		elif basename in headerItemList :
+			depandentStr += ("\\\n" + g_tabKey + headerItemList[basename])
 
 	return depandentStr
 
@@ -82,12 +90,13 @@ def is_same_dir(srcDir, dstDir) :
 	else :
 		return False
 
-def get_files(path, typeList, isRecursion = False, exceptDirList = []) :
+def get_files(path, typeList, isRecursion = False, exceptFileList = [], exceptDirList = []) :
 	'''
 	description: 获取符合条件的文件名(包括路径)列表
 	param path 指定路径
 	param typeList 文件类型
 	param isRecursion 是否递归处理子目录
+	param exceptFileList 除外的文件
 	param exceptDirList 除外的目录,仅当isRecursion为True时才生效
 	'''
 
@@ -95,11 +104,12 @@ def get_files(path, typeList, isRecursion = False, exceptDirList = []) :
 	fileNames = os.listdir(path)
 	for name in fileNames :
 		filePath = os.path.join(path, name)
+		fileFullPath = os.path.abspath(filePath)
 		isDir = os.path.isdir(filePath)
-		if isDir and (isRecursion == True) and (os.path.abspath(filePath) not in exceptDirList) :
-			resultList.extend( get_files(filePath, typeList, isRecursion, exceptDirList) )
-		elif not isDir and (os.path.splitext(filePath)[1] in typeList) :
-			resultList.append(filePath)
+		if isDir and (isRecursion == True) and (fileFullPath not in exceptDirList) :
+			resultList.extend( get_files(filePath, typeList, isRecursion, exceptFileList, exceptDirList) )	# 处理子目录
+		elif not isDir and (os.path.splitext(filePath)[1] in typeList) and (fileFullPath not in exceptFileList) :
+			resultList.append(filePath)		# 处理文件
 
 	return resultList
 
@@ -166,9 +176,9 @@ def print_project_file(sourceItemList, headerItemList):
 
 	print "all: $(OBJECTS)"
 	if g_program_type == STATIC_TYPE :
-		print "%s$(AR) %s $(OBJECTS)" % (g_tabKey, g_bin_name)
+		printTab( "%s$(AR) %s $(OBJECTS)", g_bin_name )
 	else :
-		print "%s$(CPP_LINKER) %s $(OBJECTS) $(LIBS)" % (g_tabKey, g_bin_name)
+		printTab( "$(CPP_LINKER) %s $(OBJECTS) $(LIBS)", g_bin_name )
 	for name in sourceItemList :
 		if name in headerItemList :
 			print "%s.o: %s %s%s" % ( name, headerItemList[name], sourceItemList[name], \
@@ -176,16 +186,16 @@ def print_project_file(sourceItemList, headerItemList):
 		else :
 			print "%s.o: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".o") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
-			print "%s$(CC) %s.o %s" % (g_tabKey, name, sourceItemList[name])
+			printTab( "$(CC) %s.o %s", name, sourceItemList[name] )
 		else :
-			print "%s$(CPP) %s.o %s" % (g_tabKey, name, sourceItemList[name])
+			printTab( "$(CPP) %s.o %s", name, sourceItemList[name] )
 	print g_newLine
 
 	print "debug: $(OBJECTS_DEBUG)"
 	if g_program_type == STATIC_TYPE :
-		print "%s$(AR_DEBUG) %s $(OBJECTS_DEBUG)" % (g_tabKey, g_debug_bin_name)
+		printTab( "$(AR_DEBUG) %s $(OBJECTS_DEBUG)", g_debug_bin_name)
 	else :
-		print "%s$(CPP_LINKER_DEBUG) %s $(OBJECTS_DEBUG) $(LIBS)" % (g_tabKey, g_debug_bin_name)
+		printTab( "$(CPP_LINKER_DEBUG) %s $(OBJECTS_DEBUG) $(LIBS)", g_debug_bin_name )
 	for name in sourceItemList :
 		if name in headerItemList :
 			print "%s.od: %s %s%s" % (name, headerItemList[name], sourceItemList[name], \
@@ -193,18 +203,18 @@ def print_project_file(sourceItemList, headerItemList):
 		else :
 			print "%s.od: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".od") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
-			print "%s$(CC_DEBUG) %s.od %s" % (g_tabKey, name, sourceItemList[name])	
+			printTab( "$(CC_DEBUG) %s.od %s", name, sourceItemList[name] )	
 		else :
-			print "%s$(CPP_DEBUG) %s.od %s" % (g_tabKey, name, sourceItemList[name])	
+			printTab( "$(CPP_DEBUG) %s.od %s", name, sourceItemList[name] )	
 	print g_newLine
 	
 	print "install:"
-	print "%secho \"install function not set\"" % g_tabKey
+	printTab( "echo \"install function not set\"" )
 	print g_newLine
 
 	print "clean:"
-	print "%srm -f %s %s" % (g_tabKey, g_bin_name, g_debug_bin_name)
-	print "%srm -rf *.o *.od" % g_tabKey
+	printTab( "rm -f %s %s", g_bin_name, g_debug_bin_name )
+	printTab( "rm -rf *.o *.od" )
 
 def printTab(format, *args) :
 	print g_tabKey,
@@ -213,12 +223,12 @@ def printTab(format, *args) :
 
 if __name__ == "__main__" :
 	path = "."
-
 	sourceTypeList = (".cpp", ".c")
 	headerTypeList = (".h", )
-	exceptDirList = [ os.path.abspath(i) for i in g_except_dir_list ]
-	sourceItemList = createIndex( get_files(path, sourceTypeList, g_handle_subdir, exceptDirList) )
-	headerItemList = createIndex( get_files(path, headerTypeList, g_handle_subdir, exceptDirList) )
+	exceptFileList = [ os.path.abspath(i) for i in g_except_file_list ]
+	exceptDirList  = [ os.path.abspath(i) for i in g_except_dir_list ]
+	sourceItemList = createIndex( get_files(path, sourceTypeList, g_handle_subdir, exceptFileList, exceptDirList) )
+	headerItemList = createIndex( get_files(path, headerTypeList, g_handle_subdir, exceptFileList, exceptDirList) )
 
 	if g_program_type == DYNAMIC_TYPE :
 		g_libs_opt += " -shared"
