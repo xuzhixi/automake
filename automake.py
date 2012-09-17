@@ -1,29 +1,11 @@
 #!/usr/bin/python
-#coding: UTF-8
-#	author:		 XuZhiXi
+#	coding: UTF-8
+#	author:	XuZhiXi
 #	create Time: 2012-08-02 18:15:39
 
 import os
 import re
-
-
-#user global set
-g_bin_name = "room_server"	# 生成程序名或动态库名或静态库名
-g_debug_bin_name = "room_server_debug"	# 执行make debug时生成的程序名
-
-g_compilers_opt = "-W -Wall -Wpointer-arith -pipe -D_REENTRANT -O3"	# 编译选项
-g_debug_compilers_opt = "-W -Wall -Wpointer-arith -pipe -D_REENTRANT"	# debug的编译选项
-
-g_include_opt = "-I/root/ACE_wrappers -I/root/ACE/rsns"	# 包含的头文件选项
-g_libs_opt = "-L/root/ACE_wrappers/ace -L/root/lib -lACE -lmysqlclient -lz -ldl -lpthread -lrt -lvspasswd -lip_query"	# 包含的动态库选项
-
-g_ar_opt = "" # 编译静态库时, ar命令的选项
-
-g_program_type = 1		# 1 表示一般程序, 2 表示动态库, 3 表示静态库
-g_except_file_list = [] # 不进行编译链接处理的文件
-g_handle_subdir = True	# 是否递归对子目录进行编译链接
-g_except_dir_list = [ ]	# 不进行编译链接处理的目录, 仅当g_handle_subdir设置为True时才有效
-
+from automake_config import *
 
 
 # program global set
@@ -32,53 +14,39 @@ DYNAMIC_TYPE = 2	# dynamic library
 STATIC_TYPE = 3		# static library
 g_tabKey = "\t"
 g_newLine = g_tabKey
+
+includeReg = ur'''^\s*#include\s*"(.+?\.h)"\s*$'''		# 获取所包含头文件的正则表达式
 sourceItemList = None
 headerItemList = None
 
 
-def get_depandent_str(fileList, suffix) :
+def get_depandent_str(fileName, suffix) :
 	resultList = []
-	for file in fileList :
-		ls = get_depandent_list( file )
-		resultList.extend( ls )
+	get_depandent_list( fileName, resultList )
 	resultList = list( set( resultList ) )	# 去重
 
 	return get_str_by_filelist( resultList, suffix ) 
 
-def get_str_by_filelist(fileNameList, suffix = ".o") :
+def get_str_by_filelist(fileNameList, suffix = ".h") :
 	depandentStr = ""
 	for fileName in fileNameList :
-		basename = os.path.basename( fileName )
-		if basename in sourceItemList :
-			depandentStr += ("\\\n" + g_tabKey + basename + suffix)
-		elif basename in headerItemList :
+		basename = os.path.splitext( os.path.basename( fileName ) )[0]
+		if basename in headerItemList :
 			depandentStr += ("\\\n" + g_tabKey + headerItemList[basename])
 
 	return depandentStr
 
-def get_depandent_list(fileName) :
+def get_depandent_list(fileName, depandentList) :
 	basedir = os.path.dirname( fileName )
 	f = open( fileName, "r" )
-	re_obj = re.compile( ur'''^\s*#include\s*"(.+?)\.h"\s*$''' )
-	depandentList = []
+	reObj = re.compile( includeReg )
 	for line in f :
-		fileNameList = re_obj.findall( line )
+		fileNameList = reObj.findall( line )
 		if fileNameList :
 			fullName = os.path.abspath( os.path.join( basedir, fileNameList[0] ) )
-			if not is_same_file( os.path.splitext( fileName )[0], fullName ) :
+			if (fullName not in depandentList) and os.path.exists(fullName) :
 				depandentList.append( fullName )
-
-	return depandentList
-	
-def is_same_file(file1, file2) :
-	'''
-	是否同一文件
-	'''
-
-	fileName1 = os.path.abspath( file1 )
-	fileName2 = os.path.abspath( file2 )
-
-	return ( fileName1 == fileName2 )
+				get_depandent_list( fullName, depandentList )
 
 def is_same_dir(srcDir, dstDir) :
 	'''
@@ -168,7 +136,7 @@ def print_objects(sourceItemList) :
 	print "OBJECTS_DEBUG=\\"
 	print objDebugFileListStr + g_tabKey
 
-def print_project_file(sourceItemList, headerItemList):
+def print_project_file(sourceItemList):
 	print "################################################################################"
 	print "### Project Files ##############################################################"
 	print "################################################################################"
@@ -180,11 +148,7 @@ def print_project_file(sourceItemList, headerItemList):
 	else :
 		printTab( "$(CPP_LINKER) %s $(OBJECTS) $(LIBS)", g_bin_name )
 	for name in sourceItemList :
-		if name in headerItemList :
-			print "%s.o: %s %s%s" % ( name, headerItemList[name], sourceItemList[name], \
-					get_depandent_str([ headerItemList[name], sourceItemList[name] ], ".o") )
-		else :
-			print "%s.o: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".o") )
+		print "%s.o: %s%s" % ( name, sourceItemList[name], get_depandent_str(sourceItemList[name], ".h") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
 			printTab( "$(CC) %s.o %s", name, sourceItemList[name] )
 		else :
@@ -197,11 +161,7 @@ def print_project_file(sourceItemList, headerItemList):
 	else :
 		printTab( "$(CPP_LINKER_DEBUG) %s $(OBJECTS_DEBUG) $(LIBS)", g_debug_bin_name )
 	for name in sourceItemList :
-		if name in headerItemList :
-			print "%s.od: %s %s%s" % (name, headerItemList[name], sourceItemList[name], \
-					get_depandent_str([ headerItemList[name], sourceItemList[name] ], ".od") )
-		else :
-			print "%s.od: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".od") )
+		print "%s.od: %s%s" % ( name, sourceItemList[name], get_depandent_str(sourceItemList[name], ".h") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
 			printTab( "$(CC_DEBUG) %s.od %s", name, sourceItemList[name] )	
 		else :
@@ -235,5 +195,5 @@ if __name__ == "__main__" :
 
 	print_compilers()
 	print_objects(sourceItemList)
-	print_project_file(sourceItemList, headerItemList)
+	print_project_file(sourceItemList)
 	
