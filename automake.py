@@ -1,24 +1,26 @@
 #!/usr/bin/python
-#	coding: UTF-8
+#coding: UTF-8
 #	author:		 XuZhiXi
 #	create Time: 2012-08-02 18:15:39
 
 import os
+import re
+
 
 #user global set
-g_bin_name = "libky.so"	# 生成程序名或动态库名或静态库名
-g_debug_bin_name = "libky.so"	# 执行make debug时生成的程序名
+g_bin_name = "room_server"	# 生成程序名或动态库名或静态库名
+g_debug_bin_name = "room_server_debug"	# 执行make debug时生成的程序名
 
 g_compilers_opt = "-W -Wall -Wpointer-arith -pipe -D_REENTRANT -O3"	# 编译选项
 g_debug_compilers_opt = "-W -Wall -Wpointer-arith -pipe -D_REENTRANT"	# debug的编译选项
 
-g_include_opt = ""	# 包含的头文件选项
-g_libs_opt = "-lpthread"	# 包含的动态库选项
+g_include_opt = "-I/root/ACE_wrappers -I/root/ACE/rsns"	# 包含的头文件选项
+g_libs_opt = "-L/root/ACE_wrappers/ace -L/root/lib -lACE -lmysqlclient -lz -ldl -lpthread -lrt -lvspasswd -lip_query"	# 包含的动态库选项
 
 g_ar_opt = "" # 编译静态库时, ar命令的选项
 
-g_program_type = 2	# 1 表示一般程序, 2 表示动态库, 3 表示静态库
-g_handle_subdir = False	# 是否递归对子目录进行编译链接
+g_program_type = 1	# 1 表示一般程序, 2 表示动态库, 3 表示静态库
+g_handle_subdir = True	# 是否递归对子目录进行编译链接
 g_except_dir_list = [ ]	# 不进行编译链接处理的目录, 仅当g_handle_subdir设置为True时才有效
 
 
@@ -30,6 +32,45 @@ STATIC_TYPE = 3		# static library
 g_tabKey = "\t"
 g_newLine = g_tabKey
 
+def get_depandent_str(fileList, suffix) :
+	resultList = []
+	for file in fileList :
+		ls = get_depandent_list( file )
+		resultList.extend( ls )
+	resultList = list( set( resultList ) )	# 去重
+
+	return get_str_by_filelist( resultList, suffix ) 
+
+def get_str_by_filelist(fileNameList, suffix = ".o") :
+	depandentStr = ""
+	for fileName in fileNameList :
+		depandentStr += ("\\\n" + g_tabKey + os.path.basename(fileName) + suffix)
+
+	return depandentStr
+
+def get_depandent_list(fileName) :
+	basedir = os.path.dirname( fileName )
+	f = open( fileName, "r" )
+	re_obj = re.compile( ur'''^\s*#include\s*"(.+?)\.h"\s*$''' )
+	depandentList = []
+	for line in f :
+		fileNameList = re_obj.findall( line )
+		if fileNameList :
+			fullName = os.path.abspath( os.path.join( basedir, fileNameList[0] ) )
+			if not is_same_file( os.path.splitext( fileName )[0], fullName ) :
+				depandentList.append( fullName )
+
+	return depandentList
+	
+def is_same_file(file1, file2) :
+	'''
+	是否同一文件
+	'''
+
+	fileName1 = os.path.abspath( file1 )
+	fileName2 = os.path.abspath( file2 )
+
+	return ( fileName1 == fileName2 )
 
 def is_same_dir(srcDir, dstDir) :
 	'''
@@ -97,8 +138,8 @@ def print_compilers() :
 	print "CPP_LINKER_DEBUG=g++ -g $(INCLUDEPATH) " + g_debug_compilers_opt + " -o"
 	print g_newLine
 
-	print "AR=ar " + g_ar_opt + " crs"
-	print "AR_DEBUG=ar " + g_ar_opt + " crs"
+	print "AR=ar " + g_ar_opt + " cqs"
+	print "AR_DEBUG=ar " + g_ar_opt + " cqs"
 	print g_newLine
 
 def print_objects(sourceItemList) :
@@ -128,13 +169,12 @@ def print_project_file(sourceItemList, headerItemList):
 		print "%s$(AR) %s $(OBJECTS)" % (g_tabKey, g_bin_name)
 	else :
 		print "%s$(CPP_LINKER) %s $(OBJECTS) $(LIBS)" % (g_tabKey, g_bin_name)
-#if g_program_type == DYNAMIC_TYPE :
-#print "%schcon -t texrel_shlib_t %s" % (g_tabKey, g_bin_name)
 	for name in sourceItemList :
 		if name in headerItemList :
-			print "%s.o: %s %s" % (name, headerItemList[name], sourceItemList[name])
+			print "%s.o: %s %s%s" % ( name, headerItemList[name], sourceItemList[name], \
+					get_depandent_str([ headerItemList[name], sourceItemList[name] ], ".o") )
 		else :
-			print "%s.o: %s" % (name, sourceItemList[name])
+			print "%s.o: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".o") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
 			print "%s$(CC) %s.o %s" % (g_tabKey, name, sourceItemList[name])
 		else :
@@ -146,13 +186,12 @@ def print_project_file(sourceItemList, headerItemList):
 		print "%s$(AR_DEBUG) %s $(OBJECTS_DEBUG)" % (g_tabKey, g_debug_bin_name)
 	else :
 		print "%s$(CPP_LINKER_DEBUG) %s $(OBJECTS_DEBUG) $(LIBS)" % (g_tabKey, g_debug_bin_name)
-#if g_program_type == DYNAMIC_TYPE :
-#print "%schcon -t texrel_shlib_t %s" % (g_tabKey, g_debug_bin_name)
 	for name in sourceItemList :
 		if name in headerItemList :
-			print "%s.od: %s %s" % (name, headerItemList[name], sourceItemList[name])
+			print "%s.od: %s %s%s" % (name, headerItemList[name], sourceItemList[name], \
+					get_depandent_str([ headerItemList[name], sourceItemList[name] ], ".od") )
 		else :
-			print "%s.od: %s" % (name, sourceItemList[name])
+			print "%s.od: %s%s" % ( name, sourceItemList[name], get_depandent_str([ sourceItemList[name] ], ".od") )
 		if os.path.splitext( sourceItemList[name] )[1] == ".c" :
 			print "%s$(CC_DEBUG) %s.od %s" % (g_tabKey, name, sourceItemList[name])	
 		else :
@@ -166,6 +205,10 @@ def print_project_file(sourceItemList, headerItemList):
 	print "clean:"
 	print "%srm -f %s %s" % (g_tabKey, g_bin_name, g_debug_bin_name)
 	print "%srm -rf *.o *.od" % g_tabKey
+
+def printTab(format, *args) :
+	print g_tabKey,
+	print format % args
 
 
 if __name__ == "__main__" :
